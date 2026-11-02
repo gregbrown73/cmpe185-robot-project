@@ -1,0 +1,55 @@
+{
+  "coordinate_frame": {
+    "description": "Webots ENU and project frame share the x-y floor plane; z is up; theta is counterclockwise about +z; robot and LiDAR use FLU (+x forward, +y left, +z up)",
+    "initial_pose": [-3.2, -2.2, 0.0]
+  },
+  "robot": {
+    "model": "GCtronic e-puck2 in Webots R2025a",
+    "wheel_radius_m": 0.0200,
+    "geometric_axle_length_m": 0.0520,
+    "effective_track_width_m": 0.0574,
+    "body_radius_m": 0.037,
+    "max_wheel_speed_rad_s": 6.28,
+    "motor_acceleration_rad_s2": 3.0,
+    "cruise_speed_m_s": 0.09
+  },
+  "controller": {
+    "waypoint_tolerance_m": 0.075,
+    "waypoint_slowdown_distance_m": 0.35,
+    "minimum_drive_speed_m_s": 0.025,
+    "rotate_enter_heading_error_rad": 0.24,
+    "rotate_exit_heading_error_rad": 0.055,
+    "heading_gain": 1.45,
+    "maximum_angular_speed_rad_s": 0.55,
+    "emergency_stop_distance_m": 0.10,
+    "emergency_release_distance_m": 0.18,
+    "emergency_turn_speed_rad_s": 0.75,
+    "emergency_minimum_turn_steps": 20,
+    "emergency_clear_steps": 4,
+    "avoidance_distance_m": 0.23,
+    "escape_forward_speed_m_s": 0.045,
+    "escape_forward_steps": 18,
+    "maximum_recoveries_per_waypoint": 2,
+    "display_update_steps": 4,
+    "telemetry_period_steps": 1,
+    "planning_mode": "provided_waypoints"
+  },
+  "localization": {
+    "mode": "odometry_baseline",
+    "particle_count_recommendation": 300,
+    "initial_position_std_m": 0.45,
+    "initial_heading_std_rad": 0.50
+  },
+  "map": {
+    "metadata_file": "maps/building_map.yaml",
+    "grid_file": "maps/building_map.csv",
+    "waypoints_file": "maps/waypoints.json"
+  },
+  "evaluation": {
+    "receiver_channel": 7,
+    "position_goal_tolerance_m": 0.20,
+    "collision_debounce_s": 0.50,
+    "floor_contact_height_tolerance_m": 0.005,
+    "log_every_steps": 2
+  }
+}
