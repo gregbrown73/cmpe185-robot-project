@@ -1,0 +1,10 @@
+# Python-generated files
+__pycache__/
+*.py[cod]
+
+# Generated Webots run logs, summaries, and plots
+results/*
+!results/README.md
+
+# macOS metadata
+.DS_Store
