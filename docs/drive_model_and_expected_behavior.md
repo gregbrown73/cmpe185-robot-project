@@ -1,22 +1,24 @@
 # Drive Model and Expected Starter Behavior
 
-## Release 4 parameter set
+## Release 4 calibrated parameter set
 
 | Quantity | Symbol | Value | Use |
 |---|---:|---:|---|
 | Wheel radius | `r` | `0.0200 m` | Encoder distance and inverse kinematics |
 | Geometric wheel-center spacing | `b_geom` | `0.0520 m` | Physical model documentation |
-| Effective track width | `b_eff` | `0.0574 m` | Encoder heading and wheel commands |
+| Effective track width | `b_eff` | `0.05691 m` | Encoder heading and wheel commands |
 | Collision-body radius | `R` | `0.037 m` | Clearance checks |
 | Motor command limit |  | `6.28 rad/s` | Conservative controller saturation |
 | Cruise speed |  | `0.09 m/s` | Nominal straight motion |
 | Motor acceleration |  | `3.0 rad/s²` | Smooth command changes |
 
 The official geometry and the effective track width are intentionally separate.
-The physical wheel centers are 0.0520 m apart, while the larger effective value
-matches the yaw produced by the dynamic wheel/contact model. Using `b_geom` in
-the encoder equations makes the odometry turn too far and was a major source of
-the earlier upper-wall failure.
+The physical wheel centers are 0.0520 m apart. Release 4 supplied `0.0574 m` as
+the effective reference value; the team calibration now uses `0.05691 m`, which
+is the value in `config/project_config.json`. The effective value models the yaw
+produced by the dynamic wheel/contact behavior. Using `b_geom` in the encoder
+equations makes the odometry turn too far and was a major source of the earlier
+upper-wall failure.
 
 ## Differential-drive equations
 

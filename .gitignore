@@ -2,9 +2,10 @@
 __pycache__/
 *.py[cod]
 
-# Generated Webots run logs, summaries, and plots
+# Generated Webots baseline run logs, summaries, and plots
 results/*
 !results/README.md
+runlogs/
 
 # macOS metadata
 .DS_Store

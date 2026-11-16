@@ -50,14 +50,16 @@ The supplied Webots R2025a e-puck2 model uses:
 
 - wheel radius: `0.0200 m`
 - geometric wheel-center spacing: `0.0520 m`
-- calibrated effective track width for odometry/control: `0.0574 m`
+- calibrated effective track width for odometry/control: `0.05691 m`
 - collision-body radius: `0.037 m`
 - command limit: `6.28 rad/s` (below the model's motor limit)
 - baseline cruise speed: `0.09 m/s`
 
 Both encoder odometry and inverse kinematics use the same effective track
-width. The larger effective value accounts for the Webots contact model during
-turns; substituting the geometric axle length causes heading drift. Details and
+width. The calibrated effective value accounts for the Webots contact model during
+turns; substituting the geometric axle length causes heading drift. The supplied
+Release 4 reference value was `0.0574 m`; the team calibration now uses
+`0.05691 m`. Details and
 equations are in `docs/drive_model_and_expected_behavior.md`.
 
 ## Coordinate convention

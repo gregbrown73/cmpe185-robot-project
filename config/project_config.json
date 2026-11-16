@@ -7,7 +7,7 @@
     "model": "GCtronic e-puck2 in Webots R2025a",
     "wheel_radius_m": 0.0200,
     "geometric_axle_length_m": 0.0520,
-    "effective_track_width_m": 0.0574,
+    "effective_track_width_m": 0.05691,
     "body_radius_m": 0.037,
     "max_wheel_speed_rad_s": 6.28,
     "motor_acceleration_rad_s2": 3.0,
