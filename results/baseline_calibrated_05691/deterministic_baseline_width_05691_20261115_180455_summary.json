@@ -1,0 +1,30 @@
+{
+  "source": "C:\\Users\\natch\\Desktop\\School\\cmpe185-robot-project\\results\\baseline_calibrated_05691\\deterministic_baseline_width_05691_20261115_180455.csv",
+  "duration_s": 531.872,
+  "position_rmse_m": 0.0,
+  "position_max_error_m": 0.0,
+  "heading_rmse_rad": 0.0,
+  "heading_max_error_rad": 0.0,
+  "ground_truth_path_length_m": 33.369388,
+  "average_ground_truth_speed_m_s": 0.06273950875398593,
+  "contact_sample_fraction": 0.0,
+  "lidar_telemetry_fraction": 1.0,
+  "collision_episodes": 0,
+  "goals_reached": 4,
+  "mission_complete_reported": true,
+  "final_home_error_m": 0.07380243552214279,
+  "samples_with_estimate": 16622,
+  "maximum_active_waypoint": 23,
+  "final_window_duration_s": 20.0,
+  "final_window_path_gain_m": 1.1411990000000003,
+  "controller_state_sample_counts": {
+    "drive": 14172,
+    "rotate": 2449,
+    "complete": 1
+  },
+  "safety_state_sample_counts": {
+    "clear": 16248,
+    "slowdown": 373,
+    "inactive": 1
+  }
+}

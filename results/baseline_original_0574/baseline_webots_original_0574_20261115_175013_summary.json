@@ -1,0 +1,30 @@
+{
+  "source": "C:\\Users\\natch\\Desktop\\School\\cmpe185-robot-project\\results\\baseline_original_0574\\baseline_webots_original_0574_20261115_175013.csv",
+  "duration_s": 580.8000000000001,
+  "position_rmse_m": 0.11196084014351045,
+  "position_max_error_m": 0.165834,
+  "heading_rmse_rad": 0.019392390869169048,
+  "heading_max_error_rad": 0.052911,
+  "ground_truth_path_length_m": 33.428665,
+  "average_ground_truth_speed_m_s": 0.05755624139118457,
+  "contact_sample_fraction": 0.0,
+  "lidar_telemetry_fraction": 1.0,
+  "collision_episodes": 0,
+  "goals_reached": 2,
+  "mission_complete_reported": true,
+  "final_home_error_m": 0.1257296652544657,
+  "samples_with_estimate": 9076,
+  "maximum_active_waypoint": 23,
+  "final_window_duration_s": 20.0,
+  "final_window_path_gain_m": 0.0,
+  "controller_state_sample_counts": {
+    "drive": 7001,
+    "rotate": 1226,
+    "complete": 849
+  },
+  "safety_state_sample_counts": {
+    "clear": 8186,
+    "slowdown": 41,
+    "inactive": 849
+  }
+}
