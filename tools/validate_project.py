@@ -181,9 +181,22 @@ def main() -> None:
         "Waypoint tolerance is too large for the narrowest nominal route clearance",
     )
 
+    assignment_spec = PROJECT_ROOT / "docs" / "assignment_spec.md"
+    documentation_paths = [PROJECT_ROOT / "README.md"]
+    if assignment_spec.exists():
+        documentation_paths.append(assignment_spec)
+    else:
+        # The supplied project ZIP does not include assignment_spec.md. Fall
+        # back to the provided project documentation so validation remains
+        # usable without changing the instructor/reference files.
+        documentation_paths.extend(
+            [
+                PROJECT_ROOT / "docs" / "baseline_validation.md",
+                PROJECT_ROOT / "docs" / "drive_model_and_expected_behavior.md",
+            ]
+        )
     documentation = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in [PROJECT_ROOT / "README.md", PROJECT_ROOT / "docs" / "assignment_spec.md"]
+        path.read_text(encoding="utf-8") for path in documentation_paths
     )
     require("project y = -Webots z" not in documentation, "Student documentation retains obsolete axes")
 
