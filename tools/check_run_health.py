@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Task 3 health-check tool.
+# Run with: python tools/check_run_health.py results/student_run_YYYYMMDD_HHMMSS.csv --profile student --require-complete
 """Fail-fast health check for a Webots baseline CSV log.
 
 The check looks for continued progress, not only initial motion.  This catches
@@ -15,7 +17,10 @@ from pathlib import Path
 
 
 def as_float(row: dict, key: str) -> float | None:
+    # Student logs use `time`; baseline Supervisor logs use `time_s`.
     value = row.get(key, "")
+    if value in ("", None) and key == "time_s":
+        value = row.get("time", "")
     if value in ("", None, "None"):
         return None
     try:
@@ -45,7 +50,11 @@ def evaluate(
     expected_goals: int = 4,
     home: tuple[float, float] = (-3.2, -2.2),
     home_tolerance_m: float = 0.20,
+    profile: str = "baseline",
 ) -> tuple[bool, list[str], dict]:
+    # The student profile keeps mission checks but removes the 23-waypoint rule.
+    if profile not in {"baseline", "student"}:
+        raise ValueError("profile must be 'baseline' or 'student'")
     if not rows:
         return False, ["the CSV contains no data rows"], {}
 
@@ -105,9 +114,21 @@ def evaluate(
         value for row in rows if (value := as_int(row, "active_waypoint")) is not None
     ]
     maximum_active_waypoint = max(waypoint_values) if waypoint_values else None
-    mission_complete = bool(as_int(rows[-1], "mission_complete_reported") or 0)
+    # Accept either baseline Supervisor names or student logger names.
+    mission_complete = bool(
+        as_int(rows[-1], "mission_complete_reported")
+        or as_int(rows[-1], "mission_complete")
+        or 0
+    )
     goals_reached = as_int(rows[-1], "goals_reached_ground_truth")
+    if goals_reached is None:
+        goals_reached = as_int(rows[-1], "goals_reached")
     collision_episodes = as_int(rows[-1], "collision_episodes")
+    blocked_rows = sum(
+        1
+        for row in rows
+        if str(row.get("avoidance_state", row.get("safety_state", ""))).lower() == "blocked"
+    )
     final_x = as_float(rows[-1], "gt_x_m")
     final_y = as_float(rows[-1], "gt_y_m")
     final_home_error = (
@@ -115,6 +136,8 @@ def evaluate(
         if final_x is not None and final_y is not None
         else None
     )
+    if final_home_error is None:
+        final_home_error = as_float(rows[-1], "home_error_m")
     position_errors = [
         value
         for row in rows
@@ -130,13 +153,14 @@ def evaluate(
     issues: list[str] = []
     if duration < minimum_duration_s:
         issues.append(f"run is only {duration:.1f} s; record at least {minimum_duration_s:.1f} s")
-    if duration >= minimum_duration_s and path_length < 1.0:
+    # These motion, LiDAR, and wheel checks apply only to baseline logs.
+    if profile == "baseline" and duration >= minimum_duration_s and path_length < 1.0:
         issues.append(f"ground-truth path is only {path_length:.3f} m; the robot is effectively stuck")
-    if duration > 0.0 and path_length / duration < 0.025 and not mission_complete:
+    if profile == "baseline" and duration > 0.0 and path_length / duration < 0.025 and not mission_complete:
         issues.append(
             f"average ground-truth speed is {path_length / duration:.4f} m/s; expected visible progress"
         )
-    if (
+    if profile == "baseline" and (
         duration >= minimum_duration_s
         and not mission_complete
         and final_window_path_gain < 0.15
@@ -145,13 +169,13 @@ def evaluate(
             f"ground-truth path increased only {final_window_path_gain:.3f} m "
             f"during the final {window_duration:.1f} s; the controller has stalled"
         )
-    if duration >= minimum_duration_s and final_window_emergency_fraction > 0.80:
+    if profile == "baseline" and duration >= minimum_duration_s and final_window_emergency_fraction > 0.80:
         issues.append(
             "emergency turns occupy "
             f"{100.0 * final_window_emergency_fraction:.1f}% of the final "
             f"{window_duration:.1f} s"
         )
-    if (
+    if profile == "baseline" and (
         duration >= minimum_duration_s
         and maximum_active_waypoint is not None
         and maximum_active_waypoint < 2
@@ -159,18 +183,21 @@ def evaluate(
         issues.append(
             f"active_waypoint never advanced beyond {maximum_active_waypoint}; expected progress past waypoint 1"
         )
-    if contact_fraction > 0.35:
+    if profile == "baseline" and contact_fraction > 0.35:
         issues.append(f"contact is active in {100.0 * contact_fraction:.1f}% of samples")
-    if lidar_fraction < 0.80:
+    if profile == "baseline" and lidar_fraction < 0.80:
         issues.append(f"usable LiDAR telemetry appears in only {100.0 * lidar_fraction:.1f}% of samples")
-    if command_rows and moving_command_fraction is not None and moving_command_fraction < 0.50:
+    if profile == "baseline" and command_rows and moving_command_fraction is not None and moving_command_fraction < 0.50:
         issues.append(
             f"nonzero wheel commands appear in only {100.0 * moving_command_fraction:.1f}% of command samples"
         )
+    # Apply completion checks using the selected profile.
     if require_complete:
         if not mission_complete:
             issues.append("the controller never reported mission completion")
-        if maximum_active_waypoint is None or maximum_active_waypoint < expected_waypoints:
+        if profile == "baseline" and (
+            maximum_active_waypoint is None or maximum_active_waypoint < expected_waypoints
+        ):
             issues.append(
                 "the route did not finish: maximum active_waypoint is "
                 f"{maximum_active_waypoint}; expected at least {expected_waypoints}"
@@ -188,7 +215,10 @@ def evaluate(
                 f"final HOME error is {final_home_error:.3f} m; "
                 f"limit is {home_tolerance_m:.3f} m"
             )
+        if blocked_rows:
+            issues.append(f"the controller entered a blocked state for {blocked_rows} sample(s)")
 
+    # Task 3 health metrics summarize duration, completion, safety, and blocked-state behavior.
     metrics = {
         "duration_s": duration,
         "ground_truth_path_length_m": path_length,
@@ -207,6 +237,8 @@ def evaluate(
         "position_rmse_m": position_rmse,
         "position_max_error_m": maximum_position_error,
         "full_mission_required": require_complete,
+        "profile": profile,
+        "blocked_samples": blocked_rows,
     }
     return not issues, issues, metrics
 
@@ -215,6 +247,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv_file", type=Path)
     parser.add_argument("--minimum-duration-s", type=float, default=45.0)
+    # Let the command line select baseline or student completion semantics.
+    parser.add_argument(
+        "--profile",
+        choices=("baseline", "student"),
+        default="baseline",
+        help="Use baseline waypoint rules or student mission rules.",
+    )
     parser.add_argument(
         "--require-complete",
         action="store_true",
@@ -228,6 +267,7 @@ def main() -> None:
         rows,
         args.minimum_duration_s,
         require_complete=args.require_complete,
+        profile=args.profile,
     )
 
     print("PASS" if passed else "FAIL")

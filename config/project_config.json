@@ -38,7 +38,10 @@
     "recovery_sensing_steps": 90,
     "display_update_steps": 4,
     "telemetry_period_steps": 1,
-    "planning_mode": "provided_waypoints"
+    "planning_mode": "astar_mcl",
+    "planning_inflation_radius_m": 0.12,
+    "planning_waypoint_spacing_m": 0.15,
+    "planner_retry_steps": 30
   },
   "localization": {
     "mode": "mcl",
