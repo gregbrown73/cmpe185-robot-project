@@ -210,6 +210,7 @@ def main() -> None:
     pending_replan_reason = "initial_plan" if astar_enabled else ""
     next_plan_step = 0
     previous_localization_state = "LOCALIZING"
+    localization_loss_pending_recovery = False
     previous_safety_state = safety.state
     mission_complete_logged = False
     estimated_path_length_m = 0.0
@@ -310,10 +311,12 @@ def main() -> None:
         if localization_state != previous_localization_state:
             if localization_state == "LOST":
                 logger.log_event(robot.getTime(), "LOCALIZATION_LOST")
-            elif previous_localization_state == "LOST":
+                localization_loss_pending_recovery = True
+            elif localization_state == "TRACKING" and localization_loss_pending_recovery:
                 logger.log_event(robot.getTime(), "LOCALIZATION_RECOVERED")
                 if astar_enabled:
                     pending_replan_reason = "localization_recovered"
+                localization_loss_pending_recovery = False
             previous_localization_state = localization_state
 
         localization_ready = (
