@@ -152,7 +152,7 @@ def plan_world_path(planning_grid, start_xy, goal_xy):
     """Return a collision-free metric route and a diagnostic status.
 
     ``planning_grid`` must contain the combined occupancy already inflated by
-    the project's canonical 0.12 m radius.
+    the canonical radius configured in ``maps/building_map.yaml``.
     """
     # Convert the metric start position into a grid cell.
     try:

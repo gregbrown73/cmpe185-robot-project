@@ -121,10 +121,8 @@ def main() -> None:
             f"{sorted(PLANNING_MODES)}"
         )
     astar_enabled = planning_mode in ASTAR_MODES
-    planning_inflation_radius_m = float(
-        controller_config.get("planning_inflation_radius_m", 0.12)
-    )
-    planning_grid = grid.inflated(planning_inflation_radius_m)
+    inflation_radius_m = float(grid.inflation_radius_m)
+    planning_grid = grid.inflated(inflation_radius_m)
     route_spacing_m = float(controller_config.get("planning_waypoint_spacing_m", 0.15))
 
     initial_pose = tuple(config["coordinate_frame"]["initial_pose"])
@@ -138,7 +136,7 @@ def main() -> None:
         particle_count=config["localization"]["particle_count_recommendation"],
         initial_position_std_m=config["localization"]["initial_position_std_m"],
         initial_heading_std_rad=config["localization"]["initial_heading_std_rad"],
-        inflation_radius_m=0.12,
+        inflation_radius_m=inflation_radius_m,
         motion_distance_noise_fraction=config["localization"]["motion_distance_noise_fraction"],
         motion_heading_noise_fraction=config["localization"]["motion_heading_noise_fraction"],
         ess_resample_fraction=config["localization"]["ess_resample_fraction"],

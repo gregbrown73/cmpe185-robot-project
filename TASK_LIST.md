@@ -86,7 +86,7 @@ For this plan, the rule is now fixed:
 - Do not use GPS, Supervisor pose/APIs, ground truth, or evaluation logs for
   control/localization.
 - Final global planning uses an inflated occupancy grid.
-- Canonical total inflation radius: `0.12 m` from `maps/building_map.yaml`.
+- Canonical total inflation radius: `0.20 m` from `maps/building_map.yaml`.
 - The red blocker is absent from the static map.
 - Persistent unexpected obstacles must be added to a temporary planning layer
   before replanning.
@@ -653,7 +653,7 @@ cardinal cost = 1
 diagonal cost = sqrt(2)
 octile heuristic
 no diagonal corner cutting
-combined occupancy inflated once by 0.12 m total
+combined occupancy inflated once by 0.20 m total
 line-of-sight simplification with collision checking
 append the exact mission-goal coordinate as the last route point when safe
 ```
@@ -663,7 +663,7 @@ student planner.
 
 ### 1. Planning grid
 
-Use the occupancy grid plus the canonical `0.12 m` total inflation radius.
+Use the occupancy grid plus the canonical `0.20 m` total inflation radius.
 
 The planner should accept a planning grid rather than assuming the static map is
 always the only source. This becomes important in T4/T7 when temporary obstacles
@@ -988,7 +988,7 @@ Also verify the dynamic-obstacle planning pipeline is exactly:
 ```text
 static raw grid + temporary raw hit cells
 -> combined raw occupancy
--> inflate once by 0.12 m
+-> inflate once by 0.20 m
 -> A*
 ```
 
@@ -1314,7 +1314,7 @@ Starting avoidance/progress thresholds:
 
 ```text
 front range < 0.10 m -> emergency safety behavior
-front range < 0.23 m -> local slowdown/avoidance zone
+front range < 0.15 m -> local slowdown/avoidance zone
 persistent forward blockage ~1.0 s -> candidate BLOCKED
 no meaningful route progress for 3.0 s -> candidate BLOCKED
 meaningful progress = at least 0.05 m reduction in distance-to-target
@@ -1327,7 +1327,7 @@ flow exactly:
 ```text
 raw static grid + confirmed temporary hit cells
 -> combined raw occupancy
--> inflate combined grid once by 0.12 m
+-> inflate combined grid once by 0.20 m
 -> A*
 ```
 
@@ -1346,7 +1346,7 @@ Required interface:
 ```python
 layer = TemporaryObstacleLayer(confirmation_count=3, ttl_s=5.0)
 changed = layer.observe(scan_points_robot, pose, static_grid, time_s)
-planning_grid = layer.build_planning_grid(static_grid, inflation_radius_m=0.12, time_s=time_s)
+planning_grid = layer.build_planning_grid(static_grid, inflation_radius_m=0.20, time_s=time_s)
 count = layer.active_count(time_s)
 version = layer.version
 ```

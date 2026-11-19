@@ -80,7 +80,7 @@ class StudentLocalizer:
         particle_count: int = 300,
         initial_position_std_m: float = 0.45,
         initial_heading_std_rad: float = 0.50,
-        inflation_radius_m: float = 0.12,
+        inflation_radius_m: float | None = None,
         motion_distance_noise_fraction: float = 0.05,
         motion_heading_noise_fraction: float = 0.05,
         ess_resample_fraction: float = 0.50,
@@ -98,7 +98,7 @@ class StudentLocalizer:
             raise ValueError("particle_count must be positive")
         if initial_position_std_m < 0.0 or initial_heading_std_rad < 0.0:
             raise ValueError("initialization standard deviations must be non-negative")
-        if inflation_radius_m < 0.0:
+        if inflation_radius_m is not None and inflation_radius_m < 0.0:
             raise ValueError("inflation_radius_m must be non-negative")
         if motion_distance_noise_fraction < 0.0 or motion_heading_noise_fraction < 0.0:
             raise ValueError("motion noise fractions must be non-negative")
@@ -181,6 +181,12 @@ class StudentLocalizer:
     # ------------------------------------------------------------------
 
     def _free_space_grid(self, occupancy_grid):
+        if self.inflation_radius_m is None:
+            self.inflation_radius_m = float(
+                getattr(occupancy_grid, "inflation_radius_m", 0.0)
+            )
+        if self.inflation_radius_m < 0.0:
+            raise ValueError("occupancy-grid inflation radius must be non-negative")
         free_grid = occupancy_grid.inflated(self.inflation_radius_m)
         free_cells = [
             (row, col)

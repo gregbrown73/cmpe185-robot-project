@@ -40,6 +40,7 @@ class OccupancyGrid:
     origin_x: float
     origin_y: float
     occupied_value: int = 100
+    inflation_radius_m: float = 0.0
 
     @property
     def height(self) -> int:
@@ -63,6 +64,7 @@ class OccupancyGrid:
             origin_x=float(origin[0]),
             origin_y=float(origin[1]),
             occupied_value=int(metadata.get("occupied_value", 100)),
+            inflation_radius_m=float(metadata.get("inflation_radius", 0.0)),
         )
         if grid.width != int(metadata["width"]) or grid.height != int(metadata["height"]):
             raise ValueError("Map dimensions do not match building_map.yaml")
@@ -111,5 +113,6 @@ class OccupancyGrid:
             self.origin_x,
             self.origin_y,
             self.occupied_value,
+            self.inflation_radius_m,
         )
 

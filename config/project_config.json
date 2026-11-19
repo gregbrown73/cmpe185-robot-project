@@ -15,7 +15,7 @@
   },
   "controller": {
     "waypoint_tolerance_m": 0.075,
-    "waypoint_slowdown_distance_m": 0.35,
+    "waypoint_slowdown_distance_m": 0.20,
     "minimum_drive_speed_m_s": 0.025,
     "rotate_enter_heading_error_rad": 0.24,
     "rotate_exit_heading_error_rad": 0.055,
@@ -26,7 +26,7 @@
     "emergency_turn_speed_rad_s": 0.75,
     "emergency_minimum_turn_steps": 20,
     "emergency_clear_steps": 4,
-    "avoidance_distance_m": 0.23,
+    "avoidance_distance_m": 0.15,
     "escape_forward_speed_m_s": 0.045,
     "escape_forward_steps": 18,
     "maximum_recoveries_per_waypoint": 2,
@@ -39,7 +39,6 @@
     "display_update_steps": 4,
     "telemetry_period_steps": 1,
     "planning_mode": "astar_mcl",
-    "planning_inflation_radius_m": 0.12,
     "planning_waypoint_spacing_m": 0.15,
     "planner_retry_steps": 30
   },

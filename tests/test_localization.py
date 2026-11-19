@@ -80,7 +80,7 @@ class LocalizationTests(unittest.TestCase):
 
     def test_nominal_particles_are_valid_and_normalized(self) -> None:
         localizer = self.make_localizer()
-        inflated = self.grid.inflated(0.12)
+        inflated = self.grid.inflated(self.grid.inflation_radius_m)
         self.assertEqual(len(localizer.particles), 300)
         self.assertTrue(
             all(not inflated.world_occupied(p.x, p.y) for p in localizer.particles)
