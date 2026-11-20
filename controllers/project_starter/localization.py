@@ -910,10 +910,8 @@ class StudentLocalizer:
         if not advance_state:
             return
 
-        sensor_agreement = self._measurement_score >= self.recovery_measurement_threshold
         good_tracking_update = (
-            sensor_agreement
-            and self._confidence >= 0.65
+            self._confidence >= 0.65
             and self._position_spread_m <= self.TRACKING_POSITION_SPREAD_M
             and self._heading_spread_rad <= self.TRACKING_HEADING_SPREAD_RAD
         )

@@ -168,6 +168,28 @@ class LocalizationTests(unittest.TestCase):
             },
         )
 
+    def test_tracking_debounce_uses_confidence_and_pose_spreads(self) -> None:
+        localizer = StudentLocalizer(
+            (-3.2, -2.2, 0.0),
+            particle_count=4,
+        )
+        localizer.particles = [
+            Particle(-3.2, -2.2, 0.0, 0.25),
+            Particle(-3.2, -2.2, 0.0, 0.25),
+            Particle(-3.2, -2.2, 0.0, 0.25),
+            Particle(-3.2, -2.2, 0.0, 0.25),
+        ]
+        # This is just below the old extra measurement gate, but the fixed
+        # T1/T5 confidence and spread conditions are comfortably satisfied.
+        localizer._measurement_score = 0.69
+
+        localizer._refresh_diagnostics()
+        self.assertEqual(localizer.get_state(), "LOCALIZING")
+        localizer._refresh_diagnostics()
+        self.assertEqual(localizer.get_state(), "LOCALIZING")
+        localizer._refresh_diagnostics()
+        self.assertEqual(localizer.get_state(), "TRACKING")
+
     def test_stationary_symmetric_recovery_does_not_claim_tracking(self) -> None:
         localizer = self.make_localizer()
         odometry_pose = Pose2D(-3.2, -2.2, 0.0)

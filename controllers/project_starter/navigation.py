@@ -227,6 +227,10 @@ class SafetyLayer:
     scans, preventing noisy LiDAR samples from reversing the turn every step.
     """
 
+    # The emergency threshold is for genuinely forward obstacles.  The wider
+    # slowdown zone still provides caution near the sides of the passage.
+    EMERGENCY_FRONT_HALF_ANGLE_RAD = 0.45
+
     def __init__(
         self,
         emergency_distance: float,
@@ -301,7 +305,9 @@ class SafetyLayer:
         front_points = [
             (x_forward, y_left)
             for x_forward, y_left in scan_points_robot
-            if x_forward > 0.0 and abs(atan2(y_left, x_forward)) < 0.55
+            if (
+                x_forward > 0.0 and abs(atan2(y_left, x_forward)) < self.EMERGENCY_FRONT_HALF_ANGLE_RAD
+            )
         ]
         minimum_front = self._minimum_range(front_points)
 

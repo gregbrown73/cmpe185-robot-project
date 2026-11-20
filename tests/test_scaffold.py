@@ -196,6 +196,33 @@ class NavigationTests(unittest.TestCase):
         self.assertEqual(safety.state, "clear")
         self.assertAlmostEqual(linear, 0.10)
 
+    def test_side_return_outside_emergency_cone_does_not_trigger_turn(self) -> None:
+        safety = SafetyLayer(
+            emergency_distance=0.10,
+            emergency_release_distance=0.16,
+            avoidance_distance=0.15,
+            emergency_turn_speed=0.75,
+            minimum_turn_steps=3,
+            clear_steps_required=2,
+            escape_forward_speed=0.045,
+            escape_forward_steps=2,
+            maximum_recoveries_per_waypoint=2,
+        )
+
+        side_return = [
+            (0.09 * math.cos(-0.50), 0.09 * math.sin(-0.50))
+        ]
+        linear, angular, minimum_front = safety.filter_command(0.10, 0.0, side_return)
+
+        self.assertEqual(safety.state, "clear")
+        self.assertEqual(minimum_front, math.inf)
+        self.assertAlmostEqual(linear, 0.10)
+        self.assertAlmostEqual(angular, 0.0)
+
+        head_on = [(0.09, 0.0)]
+        safety.filter_command(0.10, 0.0, head_on)
+        self.assertEqual(safety.state, "emergency_turn")
+
     def test_wheel_speed_conversion_respects_limit(self) -> None:
         left, right = unicycle_to_wheels(0.10, 0.55, 0.0200, 0.0574, 6.28)
         self.assertLessEqual(max(abs(left), abs(right)), 6.28)
