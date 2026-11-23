@@ -228,6 +228,11 @@ DEF STUDENT_ROBOT E-puck {
           width 512
           height 512
         }
+        Display {
+          name "mcl display"
+          width 512
+          height 512
+        }
       ]
     }
   ]

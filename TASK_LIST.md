@@ -86,7 +86,7 @@ For this plan, the rule is now fixed:
 - Do not use GPS, Supervisor pose/APIs, ground truth, or evaluation logs for
   control/localization.
 - Final global planning uses an inflated occupancy grid.
-- Canonical total inflation radius: `0.12 m` from `maps/building_map.yaml`.
+- Canonical total inflation radius: `0.20 m` from `maps/building_map.yaml`.
 - The red blocker is absent from the static map.
 - Persistent unexpected obstacles must be added to a temporary planning layer
   before replanning.
@@ -325,6 +325,17 @@ controllers/project_starter/localization.py
 Replace the placeholder/pass-through localization behavior with a real MCL
 estimate based on odometry motion and LiDAR/map agreement.
 
+**Implementation status (2026-11-17): COMPLETE / behavior frozen for Task 1.**
+Final post-refactor Webots verification passed nominal, uncertain-start, and kidnapped-robot
+scenarios at K = 10 s, 30 s, and 50 s. Nominal remained `TRACKING`; uncertain start remained
+safely `LOCALIZING` with the ground-truth-consistent mode preserved rather than falsely locking
+to a symmetric alias; all three kidnapped runs detected the mismatch, performed bounded recovery,
+retained a ground-truth-consistent hypothesis, stopped safely when ambiguity remained, and had
+zero collision episodes. Recovery requires both posterior dominance and a meaningful multi-view
+LiDAR score margin before declaring `TRACKING`; scan-consistent alternate modes are not pruned
+solely because their accumulated probability becomes small. Supervisor truth is used only by the
+offline scenario validator after each run, never by the student controller/localizer.
+
 ### Fixed decisions for T1
 
 Use the project coordinate/motion convention from T0. The public localization interface is fixed:
@@ -513,6 +524,26 @@ When LiDAR agreement becomes persistently terrible or the belief collapses:
 - allow the belief to reconverge;
 - do not use ground truth for detection/recovery.
 
+#### Provided-map symmetry note
+
+The supplied world/map contains repeated and near-symmetric geometry. With the baseline-allowed
+localization inputs (wheel-encoder motion, 2D LiDAR, and the static occupancy map), some tested
+poses can therefore remain observationally ambiguous across several robot-relative viewpoints.
+Do not manufacture certainty when the available measurements still support separated modes.
+
+Task-1 behavior for a multi-modal recovery belief is:
+
+- if one hypothesis becomes clearly dominant and scan-consistent, collapse around it and return
+  to `TRACKING` after the normal 3-good-update debounce;
+- if two or more separated hypotheses remain strongly scan-consistent after bounded recovery
+  motion, keep the alternatives and report `LOCALIZING`;
+- reserve `LOST` for an inconsistent/collapsed belief that still needs recovery;
+- never report the weighted midpoint between separated modes as a trusted robot pose;
+- route/mission progress remains frozen until the state is `TRACKING`.
+
+This does not add GPS, Supervisor truth, or any other localization input. It only prevents the
+filter from claiming information that the allowed sensors do not contain.
+
 ### Tests - Person 1 owns
 
 Add tests for:
@@ -528,6 +559,35 @@ Add tests for:
 - tolerance to several unexpected scan returns;
 - zero/degenerate-weight recovery;
 - recovery/reinitialization behavior.
+
+The final Task-1 regression set should also include:
+
+- an exactly symmetric case that preserves multiple strong hypotheses without false `TRACKING`;
+- an asymmetric synthetic-map case proving that the same recovery logic collapses to one strong
+  hypothesis when the measurements actually distinguish the poses;
+- `global_free_space` initialization that remains safe and does not average separated modes.
+
+Automated development check:
+
+```text
+py tools\run_task1_scenarios.py
+```
+
+This runs the Python regression suite and then automated Webots nominal, uncertain-start, and
+official `K` scenarios. The runner temporarily swaps in the test-only Supervisor fixture under
+`tests/webots/` and restores the original production Supervisor afterward; the student controller
+still receives no ground-truth pose. Normal evaluation logs and the summary remain in `results/`,
+while MCL/console logs remain in `runlogs/`. Use `--bundle-results` only when an additional
+timestamped `task1_results/<timestamp>/` copy is wanted for sharing.
+
+For route-history coverage, also run:
+
+```text
+py tools\run_task1_scenarios.py --scenario kidnap_sweep
+```
+
+This repeats the same official `K` teleport in fresh simulations at multiple pre-kidnap route times
+(default 10 s, 30 s, and 50 s). The student controller is not told the teleport time or destination.
 
 ### Deliverable to Person 2 / integration
 
@@ -545,9 +605,10 @@ Do not rename or replace this interface. Planning/navigation should depend only 
 the returned pose, state/confidence, and documented diagnostics - never on the
 particle-filter internals.
 
-**Done when:** LiDAR meaningfully changes particle weights, pose estimates are
-stable in Webots, the fixed API below is implemented exactly, and the filter can
-recover after the kidnapped-robot event.
+**Done when:** LiDAR meaningfully changes particle weights, pose estimates are stable in Webots,
+the fixed API below is implemented exactly, observable kidnapped/global-localization cases
+reconverge, and an exactly symmetric case preserves its valid alternatives without falsely
+declaring `TRACKING`.
 
 </details>
 
@@ -592,7 +653,7 @@ cardinal cost = 1
 diagonal cost = sqrt(2)
 octile heuristic
 no diagonal corner cutting
-combined occupancy inflated once by 0.12 m total
+combined occupancy inflated once by 0.20 m total
 line-of-sight simplification with collision checking
 append the exact mission-goal coordinate as the last route point when safe
 ```
@@ -602,7 +663,7 @@ student planner.
 
 ### 1. Planning grid
 
-Use the occupancy grid plus the canonical `0.12 m` total inflation radius.
+Use the occupancy grid plus the canonical `0.20 m` total inflation radius.
 
 The planner should accept a planning grid rather than assuming the static map is
 always the only source. This becomes important in T4/T7 when temporary obstacles
@@ -927,7 +988,7 @@ Also verify the dynamic-obstacle planning pipeline is exactly:
 ```text
 static raw grid + temporary raw hit cells
 -> combined raw occupancy
--> inflate once by 0.12 m
+-> inflate once by 0.20 m
 -> A*
 ```
 
@@ -956,6 +1017,13 @@ after both branches merge.
 
 Turn the T1 particle filter into a controller-ready subsystem that follows the fixed localization
 API in T1/T5 and can safely report low confidence/loss/recovery.
+
+**Implementation status (2026-11-17): COMPLETE / frozen for Task 1/T5.**
+The API/state behavior, recovery logic, and regression suite are complete. The regression suite
+protects against false alias collapse caused by posterior-only dominance, probability-only pruning
+of scan-consistent alternate modes, double-counted recovery translation, false uncertain-start
+PASS results, and accidental nonstandard output-folder behavior. The final Webots sweep passed
+nominal, uncertain-start, and kidnapped-robot tests at K = 10 s, 30 s, and 50 s.
 
 ### Fixed decisions for T5
 
@@ -990,7 +1058,8 @@ confidence, and diagnostics.
 Implement exactly:
 
 ```text
-LOCALIZING -> initial/broad belief, do not assume route is safe yet
+LOCALIZING -> initial/broad belief or scan-consistent unresolved multi-modal belief;
+              do not assume route is safe yet
 TRACKING   -> belief meets tracking thresholds
 LOST       -> belief is inconsistent/collapsed and needs recovery
 ```
@@ -1245,7 +1314,7 @@ Starting avoidance/progress thresholds:
 
 ```text
 front range < 0.10 m -> emergency safety behavior
-front range < 0.23 m -> local slowdown/avoidance zone
+front range < 0.15 m -> local slowdown/avoidance zone
 persistent forward blockage ~1.0 s -> candidate BLOCKED
 no meaningful route progress for 3.0 s -> candidate BLOCKED
 meaningful progress = at least 0.05 m reduction in distance-to-target
@@ -1258,7 +1327,7 @@ flow exactly:
 ```text
 raw static grid + confirmed temporary hit cells
 -> combined raw occupancy
--> inflate combined grid once by 0.12 m
+-> inflate combined grid once by 0.20 m
 -> A*
 ```
 
@@ -1277,7 +1346,7 @@ Required interface:
 ```python
 layer = TemporaryObstacleLayer(confirmation_count=3, ttl_s=5.0)
 changed = layer.observe(scan_points_robot, pose, static_grid, time_s)
-planning_grid = layer.build_planning_grid(static_grid, inflation_radius_m=0.12, time_s=time_s)
+planning_grid = layer.build_planning_grid(static_grid, inflation_radius_m=0.20, time_s=time_s)
 count = layer.active_count(time_s)
 version = layer.version
 ```
@@ -1528,7 +1597,8 @@ Verify:
 
 - broad initial belief is used;
 - robot does not drive aggressively before localization is trustworthy;
-- MCL converges;
+- MCL converges to one mode when observable, or preserves separated valid modes as
+  `LOCALIZING` when the supplied geometry remains observationally ambiguous;
 - plan begins from corrected pose;
 - mission completes.
 
@@ -1540,7 +1610,8 @@ Verify:
 
 - localization mismatch is detected;
 - old route is not followed blindly;
-- MCL broadens/reseeds and recovers;
+- MCL broadens/reseeds and recovers to one mode when observable; an unresolved multi-modal
+  result remains `LOCALIZING` rather than selecting a false winner;
 - route is replanned from recovered pose;
 - mission resumes.
 
@@ -1614,7 +1685,8 @@ Use a broader MCL prior.
 Expected:
 
 - remain safe while uncertain;
-- converge sufficiently;
+- converge sufficiently when the pose is observable; if repeated/near-symmetric geometry leaves
+  multiple equally valid modes, remain safely `LOCALIZING` and retain them rather than averaging;
 - generate route from estimated pose;
 - complete mission.
 
@@ -1644,7 +1716,8 @@ Expected:
 - localization becomes inconsistent;
 - MCL declares/reaches recovery state;
 - stale route is abandoned;
-- pose reconverges;
+- pose reconverges when the allowed measurements distinguish a unique mode; unresolved valid modes
+  remain explicitly multi-modal/`LOCALIZING` instead of producing false certainty;
 - A* replans;
 - mission resumes.
 

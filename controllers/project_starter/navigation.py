@@ -79,6 +79,146 @@ class WaypointFollower:
         return linear_speed, angular_speed
 
 
+class LocalizationRecoveryMotion:
+    """Run bounded sensing motions while MCL has not recovered.
+
+    A kidnapped robot must keep moving long enough to collect a new viewpoint;
+    otherwise the particle estimate can change while the physical robot stays
+    at the kidnapping location.  Each cycle is deliberately short and checks
+    front clearance before translating.  If the belief is still ambiguous at
+    the end of a cycle, another bounded cycle is armed instead of silently
+    falling back to zero velocity.  A finite cycle limit keeps the behavior
+    safe if the map or sensor data cannot support recovery.
+    """
+
+    def __init__(
+        self,
+        turn_speed: float,
+        forward_speed: float,
+        translation_steps: int,
+        translation_bursts: int,
+        sensing_steps: int,
+        avoidance_distance: float,
+        maximum_cycles: int = 12,
+    ) -> None:
+        self.turn_speed = abs(float(turn_speed))
+        self.forward_speed = max(0.0, float(forward_speed))
+        self.translation_steps = max(1, int(translation_steps))
+        self.translation_bursts = max(1, int(translation_bursts))
+        self.sensing_steps = max(1, int(sensing_steps))
+        self.avoidance_distance = max(0.0, float(avoidance_distance))
+        self.maximum_cycles = max(1, int(maximum_cycles))
+
+        self.active = False
+        self.attempted = False
+        self.cycle_count = 0
+        self.translation_steps_remaining = 0
+        self.turn_steps_remaining = 0
+        self.bursts_remaining = 0
+        self.turn_direction = 1.0
+
+    def _arm_cycle(self) -> bool:
+        if self.cycle_count >= self.maximum_cycles:
+            return False
+
+        self.cycle_count += 1
+        self.bursts_remaining = self.translation_bursts
+        self.translation_steps_remaining = self.translation_steps
+        self.turn_steps_remaining = 0
+        return True
+
+    def start(self) -> None:
+        """Start a fresh recovery maneuver after a tracking-to-loss transition."""
+        self.attempted = True
+        self.cycle_count = 0
+        self.turn_direction = 1.0
+        self.active = self._arm_cycle()
+
+    def stop(self) -> None:
+        """Stop sensing motion once tracking is recovered or the limit is hit."""
+        self.active = False
+        self.translation_steps_remaining = 0
+        self.turn_steps_remaining = 0
+        self.bursts_remaining = 0
+
+    def _finish_cycle(self, localized: bool) -> None:
+        if localized or not self._arm_cycle():
+            self.stop()
+
+    def _turn_command(self) -> tuple[float, bool]:
+        self.turn_steps_remaining = max(1, self.turn_steps_remaining)
+        angular_speed = self.turn_direction * self.turn_speed
+        self.turn_steps_remaining -= 1
+        cycle_finished = False
+        if self.turn_steps_remaining <= 0:
+            self.bursts_remaining -= 1
+            self.turn_direction *= -1.0
+            if self.bursts_remaining > 0:
+                self.translation_steps_remaining = self.translation_steps
+            else:
+                cycle_finished = True
+        return angular_speed, cycle_finished
+
+    def command(
+        self,
+        scan_points_robot: list[tuple[float, float]],
+        localized: bool,
+    ) -> tuple[float, float, float, str]:
+        """Return a safe sensing command and the minimum front clearance."""
+        minimum_front = min(
+            (
+                hypot(x, y)
+                for x, y in scan_points_robot
+                if x > 0.0 and abs(y) <= 0.20
+            ),
+            default=inf,
+        )
+        if not self.active:
+            return 0.0, 0.0, minimum_front, "localization_lost"
+
+        # The filter may become trustworthy partway through a sensing cycle.
+        # Stop immediately so the next controller step can hand the estimate
+        # back to the normal waypoint follower instead of driving on a pose
+        # that has already been declared recovered.
+        if localized:
+            self.stop()
+            return 0.0, 0.0, minimum_front, "localization_tracking"
+
+        linear_speed = 0.0
+        angular_speed = 0.0
+        controller_state = "localization_active_turn"
+        cycle_finished = False
+
+        if self.translation_steps_remaining > 0:
+            if minimum_front >= self.avoidance_distance:
+                linear_speed = self.forward_speed
+                self.translation_steps_remaining -= 1
+                controller_state = "localization_active_translate"
+                cycle_finished = (
+                    self.translation_steps_remaining == 0
+                    and self.bursts_remaining == 1
+                )
+            else:
+                # Turn in place to obtain a different view instead of driving
+                # into a wall.  This also lets the next cycle choose a new
+                # translation direction after a blocked final burst.
+                self.translation_steps_remaining = 0
+                self.turn_steps_remaining = self.sensing_steps
+                angular_speed, cycle_finished = self._turn_command()
+        elif self.turn_steps_remaining > 0:
+            angular_speed, cycle_finished = self._turn_command()
+        elif self.bursts_remaining > 1:
+            self.turn_steps_remaining = self.sensing_steps
+            angular_speed, cycle_finished = self._turn_command()
+        else:
+            cycle_finished = True
+
+        if cycle_finished:
+            self._finish_cycle(localized)
+
+        return linear_speed, angular_speed, minimum_front, controller_state
+
+
 class SafetyLayer:
     """Stateful emergency behavior only; students add full avoidance.
 
@@ -86,6 +226,10 @@ class SafetyLayer:
     Release requires both a minimum turn duration and several consecutive clear
     scans, preventing noisy LiDAR samples from reversing the turn every step.
     """
+
+    # The emergency threshold is for genuinely forward obstacles.  The wider
+    # slowdown zone still provides caution near the sides of the passage.
+    EMERGENCY_FRONT_HALF_ANGLE_RAD = 0.45
 
     def __init__(
         self,
@@ -161,7 +305,9 @@ class SafetyLayer:
         front_points = [
             (x_forward, y_left)
             for x_forward, y_left in scan_points_robot
-            if x_forward > 0.0 and abs(atan2(y_left, x_forward)) < 0.55
+            if (
+                x_forward > 0.0 and abs(atan2(y_left, x_forward)) < self.EMERGENCY_FRONT_HALF_ANGLE_RAD
+            )
         ]
         minimum_front = self._minimum_range(front_points)
 
