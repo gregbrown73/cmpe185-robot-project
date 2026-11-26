@@ -7,7 +7,7 @@ occupied_value: 100
 free_value: 0
 unknown_value: -1
 row_order: top_to_bottom
-inflation_radius: 0.20
+inflation_radius: 0.12
 coordinate_frame: "x right, y up, theta counterclockwise"
 notes: "The movable red obstacle is intentionally absent from the static map."
 

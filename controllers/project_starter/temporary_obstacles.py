@@ -58,6 +58,38 @@ class TemporaryObstacleLayer:
         return next((candidate for candidate in cells if TemporaryObstacleLayer._neighboring(candidate, cell)), None)
 
     @staticmethod
+    def _planning_representatives(
+        cells: set[tuple[int, int]],
+        cluster_radius_cells: int = 3,
+    ) -> set[tuple[int, int]]:
+        """Compress one obstacle's nearby LiDAR hit cells to one planning seed."""
+        representatives: set[tuple[int, int]] = set()
+        remaining = set(cells)
+        while remaining:
+            cluster = {remaining.pop()}
+            changed = True
+            while changed:
+                changed = False
+                for candidate in tuple(remaining):
+                    if any(
+                        max(abs(candidate[0] - member[0]), abs(candidate[1] - member[1]))
+                        <= cluster_radius_cells
+                        for member in cluster
+                    ):
+                        remaining.remove(candidate)
+                        cluster.add(candidate)
+                        changed = True
+            mean_row = sum(cell[0] for cell in cluster) / len(cluster)
+            mean_col = sum(cell[1] for cell in cluster) / len(cluster)
+            representatives.add(
+                min(
+                    cluster,
+                    key=lambda cell: (cell[0] - mean_row) ** 2 + (cell[1] - mean_col) ** 2,
+                )
+            )
+        return representatives
+
+    @staticmethod
     def _world_point(
         pose: tuple[float, float, float],
         point_robot: tuple[float, float],
@@ -171,11 +203,16 @@ class TemporaryObstacleLayer:
         static_grid: OccupancyGrid,
         inflation_radius_m: float = 0.20,
         time_s: float = 0.0,
+        start_xy: tuple[float, float] | None = None,
     ) -> OccupancyGrid:
-        """Combine raw static and temporary occupancy, then inflate exactly once."""
+        """Combine raw occupancy, inflate once, and preserve a free start cell."""
         self._expire(float(time_s))
         combined_cells = [row[:] for row in static_grid.cells]
-        for row, col in self._active:
+        # One physical blocker can produce several surface returns. Compress
+        # nearby confirmed cells before inflation so those returns do not grow
+        # into an artificial wall wider than the observed obstacle.
+        planning_cells = self._planning_representatives(set(self._active))
+        for row, col in planning_cells:
             if static_grid.in_bounds(row, col):
                 combined_cells[row][col] = static_grid.occupied_value
         combined = OccupancyGrid(
@@ -186,7 +223,14 @@ class TemporaryObstacleLayer:
             static_grid.occupied_value,
             inflation_radius_m=0.0,
         )
-        return combined.inflated(float(inflation_radius_m))
+        planning_grid = combined.inflated(float(inflation_radius_m))
+        if start_xy is not None:
+            # A nearby temporary blocker can inflate into the robot's current
+            # free cell; preserve that cell so A* can search an escape route.
+            start_cell = static_grid.world_to_cell(*start_xy)
+            if static_grid.in_bounds(*start_cell) and not static_grid.occupied(*start_cell):
+                planning_grid.cells[start_cell[0]][start_cell[1]] = 0
+        return planning_grid
 
     def active_count(self, time_s: float) -> int:
         """Return the number of active confirmed temporary cells."""

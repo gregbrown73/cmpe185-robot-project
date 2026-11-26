@@ -1,10 +1,10 @@
 """Runnable CMPE 185 controller with MCL, A* planning, and diagnostics.
 
 The controller keeps the original baseline waypoint route in
-``maps/waypoints.json`` for comparison, but the default ``astar_mcl`` mode
-plans each mission leg from the current localization estimate.  Odometry is
-still used as the motion input to MCL; it is not used as the planner's pose
-when MCL is selected.
+``maps/waypoints.json`` for comparison, while the default
+``full_student_method`` mode uses MCL, A*, the Task 6 route manager, and Task 7
+obstacle handling. Odometry remains the motion input to MCL; it is not used as
+the planner's pose when MCL is selected.
 """
 
 from __future__ import annotations
@@ -33,17 +33,21 @@ from planning import (
     plan_world_path,
     simplify_world_path,
 )
+from route_manager import RouteManager
+from temporary_obstacles import TemporaryObstacleLayer
 from visualization import DisplayVisualizer, MCLDebugVisualizer
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PLANNING_MODES = {
     "provided_waypoints",
+    "astar",
+}
+EXPERIMENT_METHODS = {
+    "odometry_baseline",
     "mcl_only",
-    "astar_mcl",
     "full_student_method",
 }
-ASTAR_MODES = {"astar_mcl", "full_student_method"}
 
 
 def load_json(path: Path) -> dict:
@@ -77,15 +81,52 @@ def plan_route_from_pose(
     return route, status
 
 
+def select_experiment_modes(config: dict) -> tuple[str, str, str, str]:
+    """Resolve the fixed Task 8 experiment, localization, planning, and avoidance modes."""
+    # TASK 8: Keep one explicit mode table so baseline and student runs cannot
+    # accidentally mix localization, planning, and avoidance implementations.
+    experiment_method = config.get("experiment", {}).get("method")
+    if experiment_method is None:
+        # Accept the pre-T8 configuration names while users transition configs.
+        legacy_planning = config.get("controller", {}).get(
+            "planning_mode", "provided_waypoints"
+        )
+        legacy_localization = config.get("localization", {}).get("mode", "mcl")
+        if legacy_planning == "provided_waypoints":
+            experiment_method = (
+                "odometry_baseline"
+                if legacy_localization in {"odometry", "odometry_baseline"}
+                else "mcl_only"
+            )
+        else:
+            experiment_method = "full_student_method"
+    if experiment_method not in EXPERIMENT_METHODS:
+        raise ValueError(
+            "experiment.method must be one of "
+            f"{sorted(EXPERIMENT_METHODS)}"
+        )
+    selection = {
+        "odometry_baseline": ("odometry", "provided_waypoints", "starter_safety"),
+        "mcl_only": ("mcl", "provided_waypoints", "starter_safety"),
+        "full_student_method": ("mcl", "astar", "student_avoidance"),
+    }
+    localization_mode, planning_mode, avoidance_mode = selection[experiment_method]
+    mapping_mode = config.get("mapping", {}).get("mode", "off")
+    if mapping_mode not in {"off", "occupancy_mapping"}:
+        raise ValueError("mapping.mode must be 'off' or 'occupancy_mapping'")
+    return experiment_method, localization_mode, planning_mode, avoidance_mode
+
+
 def main() -> None:
     config = load_json(PROJECT_ROOT / "config" / "project_config.json")
     waypoints_data = load_json(PROJECT_ROOT / "maps" / "waypoints.json")
     grid = OccupancyGrid.from_files(PROJECT_ROOT / "maps" / "building_map.yaml")
-    localization_mode = config["localization"]["mode"]
-    if localization_mode not in {"odometry", "odometry_baseline", "mcl"}:
-        raise ValueError(
-            "localization.mode must be 'odometry_baseline', 'odometry', or 'mcl'"
-        )
+    (
+        experiment_method,
+        localization_mode,
+        planning_mode,
+        avoidance_mode,
+    ) = select_experiment_modes(config)
 
     robot = Robot()
     time_step = int(robot.getBasicTimeStep())
@@ -114,15 +155,16 @@ def main() -> None:
 
     robot_config = config["robot"]
     controller_config = config["controller"]
-    planning_mode = controller_config.get("planning_mode", "astar_mcl")
     if planning_mode not in PLANNING_MODES:
         raise ValueError(
             "controller.planning_mode must be one of "
             f"{sorted(PLANNING_MODES)}"
         )
-    astar_enabled = planning_mode in ASTAR_MODES
+    astar_enabled = planning_mode == "astar"
     inflation_radius_m = float(grid.inflation_radius_m)
-    planning_grid = grid.inflated(inflation_radius_m)
+    # TASK 8: Keep the static map raw; temporary obstacles are combined first,
+    # then the complete planning map is inflated exactly once before A*.
+    planning_grid = grid
     route_spacing_m = float(controller_config.get("planning_waypoint_spacing_m", 0.15))
 
     initial_pose = tuple(config["coordinate_frame"]["initial_pose"])
@@ -174,6 +216,7 @@ def main() -> None:
         controller_config["escape_forward_speed_m_s"],
         controller_config["escape_forward_steps"],
         controller_config["maximum_recoveries_per_waypoint"],
+        student_avoidance=avoidance_mode == "student_avoidance",
     )
     visualizer = DisplayVisualizer(display, grid)
     mcl_visualizer = MCLDebugVisualizer(mcl_display, grid)
@@ -185,7 +228,7 @@ def main() -> None:
     # Task 3 logging is additive; the production evaluation Supervisor remains
     # unchanged and the original MCL debug log remains available.
     logger = StudentRunLogger(
-        experiment_method=planning_mode,
+        experiment_method=experiment_method,
         scenario_name=config.get("experiment", {}).get("scenario_name", "default"),
         trial_number=int(config.get("experiment", {}).get("trial_number", 1)),
         random_seed=config.get("experiment", {}).get("random_seed"),
@@ -196,6 +239,17 @@ def main() -> None:
     baseline_route = [tuple(point) for point in waypoints_data["baseline_waypoints"]]
     goals = list(waypoints_data["delivery_goals"])
     goals.append({"name": "HOME", "position": waypoints_data["home"]["position"]})
+    # TASK 8: Task 6 owns generated mission-route state; Task 7 owns dynamic
+    # planning evidence. Neither subsystem edits the static map in place.
+    route_manager = RouteManager(
+        goals,
+        route_point_tolerance=float(controller_config["waypoint_tolerance_m"]),
+        goal_tolerance=float(config["evaluation"]["position_goal_tolerance_m"]),
+    )
+    temporary_obstacles = TemporaryObstacleLayer(
+        confirmation_count=int(controller_config.get("temporary_obstacle_confirmation_count", 3)),
+        ttl_s=float(controller_config.get("temporary_obstacle_ttl_s", 5.0)),
+    )
     route = [] if astar_enabled else baseline_route[:]
     active_waypoint = 0
     mission_goal_index = 0
@@ -205,7 +259,6 @@ def main() -> None:
     replan_count = 0
     last_replan_reason = ""
     last_plan_status = "PENDING" if astar_enabled else "BASELINE"
-    pending_replan_reason = "initial_plan" if astar_enabled else ""
     next_plan_step = 0
     previous_localization_state = "LOCALIZING"
     localization_loss_pending_recovery = False
@@ -313,7 +366,7 @@ def main() -> None:
             elif localization_state == "TRACKING" and localization_loss_pending_recovery:
                 logger.log_event(robot.getTime(), "LOCALIZATION_RECOVERED")
                 if astar_enabled:
-                    pending_replan_reason = "localization_recovered"
+                    route_manager.request_replan("LOCALIZATION_RECOVERED")
                 localization_loss_pending_recovery = False
             previous_localization_state = localization_state
 
@@ -325,80 +378,79 @@ def main() -> None:
             recovery_motion.stop()
 
             if astar_enabled:
-                # A* plans one leg at a time: A, B, C, then HOME.  The goal
-                # coordinates come from the project map, not Supervisor pose.
-                if mission_goal_index < len(goals):
-                    current_goal = tuple(goals[mission_goal_index]["position"])
-                    if (
-                        follower.distance_to(estimate, current_goal)
-                        <= config["evaluation"]["position_goal_tolerance_m"]
-                    ):
-                        reached_goal = goals[mission_goal_index]
-                        mission_goal_index += 1
-                        logger.log_event(
-                            robot.getTime(),
-                            "GOAL_REACHED",
-                            details=str(reached_goal.get("name", mission_goal_index)),
-                        )
-                        route = []
-                        active_waypoint = 0
-                        pending_replan_reason = "goal_reached"
-
-                if mission_goal_index >= len(goals):
-                    mission_complete = True
-                    route = []
-                    active_waypoint = 0
-                elif (
-                    pending_replan_reason
-                    or not route and step_count >= next_plan_step
-                ):
-                    current_goal = tuple(goals[mission_goal_index]["position"])
-                    reason = pending_replan_reason or "route_unavailable"
-                    logger.log_event(
-                        robot.getTime(),
-                        "REPLAN_REQUEST",
-                        details=reason,
-                    )
-                    route, last_plan_status = plan_route_from_pose(
-                        planning_grid,
+                # TASK 8: Task 7 observes dynamic obstacles only for the full
+                # student method; baseline and MCL-only modes never add them.
+                now_s = robot.getTime()
+                if avoidance_mode == "student_avoidance":
+                    temporary_obstacles.observe(
+                        scan_points,
                         estimate,
-                        current_goal,
-                        route_spacing_m,
+                        grid,
+                        now_s,
+                        localization_state=localization_state,
                     )
-                    route_version += 1
-                    replan_count += 1
-                    last_replan_reason = reason
-                    pending_replan_reason = ""
-                    if last_plan_status == SUCCESS:
-                        active_waypoint = 0
-                        safety.reset_for_waypoint()
-                        next_plan_step = step_count
-                    else:
-                        route = []
-                        active_waypoint = 0
-                        next_plan_step = step_count + int(
-                            controller_config.get("planner_retry_steps", 30)
-                        )
-                        logger.log_event(
-                            robot.getTime(),
-                            "NO_PATH",
-                            details=f"{last_plan_status}:{goals[mission_goal_index]['name']}",
-                        )
 
-                if route:
-                    previous_active_waypoint = active_waypoint
-                    while (
-                        active_waypoint < len(route)
-                        and follower.distance_to(
-                            estimate, route[active_waypoint]
+                # TASK 8: RouteManager owns route progress and mission-goal
+                # transitions; A* only supplies one route per active goal.
+                route_manager.advance_route(estimate)
+                goal_index_before = route_manager.active_goal_index
+                if route_manager.advance_goal(estimate):
+                    reached_goal = goals[goal_index_before]
+                    logger.log_event(
+                        now_s,
+                        "GOAL_REACHED",
+                        details=str(reached_goal.get("name", goal_index_before)),
+                    )
+
+                if route_manager.state == "COMPLETE":
+                    mission_complete = True
+                elif route_manager.state == "NO_PATH" and step_count >= next_plan_step:
+                    route_manager.request_replan("PATH_INVALID")
+
+                if not mission_complete and route_manager.needs_plan():
+                    current_goal = route_manager.current_goal()
+                    if current_goal is not None:
+                        reason = route_manager.replan_reason or "initial_plan"
+                        logger.log_event(
+                            now_s,
+                            "REPLAN_REQUEST",
+                            details=reason,
                         )
-                        <= controller_config["waypoint_tolerance_m"]
-                    ):
-                        active_waypoint += 1
-                    if active_waypoint != previous_active_waypoint:
-                        safety.reset_for_waypoint()
-                    if active_waypoint >= len(route) and not mission_complete:
-                        pending_replan_reason = "route_exhausted"
+                        if avoidance_mode == "student_avoidance":
+                            planning_grid = temporary_obstacles.build_planning_grid(
+                                grid,
+                                inflation_radius_m=inflation_radius_m,
+                                time_s=now_s,
+                                start_xy=(estimate.x, estimate.y),
+                            )
+                        else:
+                            planning_grid = grid.inflated(inflation_radius_m)
+                        planned_route, last_plan_status = plan_route_from_pose(
+                            planning_grid,
+                            estimate,
+                            current_goal,
+                            route_spacing_m,
+                        )
+                        replan_count += 1
+                        last_replan_reason = reason
+                        if last_plan_status == SUCCESS:
+                            route_manager.install_route(planned_route)
+                            safety.reset_for_waypoint()
+                            next_plan_step = step_count
+                        else:
+                            route_manager.mark_no_path()
+                            next_plan_step = step_count + int(
+                                controller_config.get("planner_retry_steps", 30)
+                            )
+                            logger.log_event(
+                                now_s,
+                                "NO_PATH",
+                                details=f"{last_plan_status}:{goals[route_manager.active_goal_index]['name']}",
+                            )
+
+                route = list(route_manager.route)
+                active_waypoint = route_manager.route_index
+                mission_goal_index = route_manager.active_goal_index
             else:
                 # The original route is deliberately preserved as a selectable
                 # baseline for the final comparison experiments.
@@ -497,25 +549,40 @@ def main() -> None:
                 estimate,
                 route[active_waypoint],
             )
-            linear_speed, angular_speed, minimum_front = safety.filter_command(
-                linear_speed,
-                angular_speed,
-                scan_points,
-            )
+            if avoidance_mode == "student_avoidance":
+                linear_speed, angular_speed, minimum_front = safety.filter_command(
+                    linear_speed,
+                    angular_speed,
+                    scan_points,
+                    pose=estimate,
+                    target=route[active_waypoint],
+                    time_s=robot.getTime(),
+                )
+            else:
+                linear_speed, angular_speed, minimum_front = safety.filter_command(
+                    linear_speed,
+                    angular_speed,
+                    scan_points,
+                )
             controller_state = follower.state
 
-        # The starter safety layer can react to an unexpected obstacle.  With
-        # A* enabled this requests a fresh static-map plan; LiDAR avoidance
-        # still remains responsible for the immediate safety response.
-        if safety.state == "blocked" and previous_safety_state != "blocked":
-            if astar_enabled:
-                pending_replan_reason = "safety_blocked"
-            else:
-                logger.log_event(
-                    robot.getTime(),
-                    "REPLAN_REQUEST",
-                    details="blocked",
-                )
+        # TASK 8: A BLOCKED signal is accepted only when Task 7 has a
+        # confirmed temporary obstacle and localization is TRACKING.
+        if avoidance_mode == "student_avoidance" and astar_enabled:
+            confirmed_obstacle = temporary_obstacles.active_count(robot.getTime()) > 0
+            if safety.consider_blocked_replan(
+                localization_state,
+                confirmed_obstacle,
+                time_s=robot.getTime(),
+            ):
+                route_manager.request_replan("BLOCKED")
+                safety.clear_replan_request()
+        elif safety.state == "blocked" and previous_safety_state != "blocked":
+            logger.log_event(
+                robot.getTime(),
+                "REPLAN_REQUEST",
+                details="blocked",
+            )
         previous_safety_state = safety.state
 
         left_speed, right_speed = unicycle_to_wheels(
@@ -529,12 +596,23 @@ def main() -> None:
         right_motor.setVelocity(right_speed)
 
         if step_count % controller_config["display_update_steps"] == 0:
+            # TASK 8: RouteManager removes an already-reached start point from
+            # generated routes; prepend the current pose so the display still
+            # shows the first visible leg into the next hallway/waypoint.
+            display_route = route
+            display_active_waypoint = active_waypoint
+            if astar_enabled and route:
+                display_route = [
+                    (float(estimate.x), float(estimate.y)),
+                    *route[active_waypoint:],
+                ]
+                display_active_waypoint = 0
             visualizer.draw(
                 estimate,
                 scan_points,
-                route,
+                display_route,
                 goals,
-                min(active_waypoint, max(0, len(route) - 1)),
+                min(display_active_waypoint, max(0, len(display_route) - 1)),
                 localization_mode,
                 controller_state,
                 safety.state,
@@ -550,19 +628,35 @@ def main() -> None:
             )
 
         if step_count % controller_config["telemetry_period_steps"] == 0:
+            telemetry_goal_index = (
+                route_manager.active_goal_index if astar_enabled else mission_goal_index
+            )
+            telemetry_route_version = (
+                route_manager.route_version if astar_enabled else route_version
+            )
+            telemetry_replan_reason = (
+                route_manager.replan_reason
+                if astar_enabled and route_manager.replan_reason != "NONE"
+                else last_replan_reason
+            )
+            temporary_count = (
+                temporary_obstacles.active_count(robot.getTime())
+                if avoidance_mode == "student_avoidance"
+                else 0
+            )
             diagnostics = {
                 "active_goal": (
-                    goals[mission_goal_index]["name"]
-                    if mission_goal_index < len(goals)
+                    goals[telemetry_goal_index]["name"]
+                    if telemetry_goal_index < len(goals)
                     else "HOME"
                 ),
                 "route_index": active_waypoint,
                 "route_count": len(route),
-                "route_version": route_version,
+                "route_version": telemetry_route_version,
                 "replan_count": replan_count,
-                "replan_reason": last_replan_reason,
+                "replan_reason": telemetry_replan_reason,
                 "avoidance_state": safety.state,
-                "temporary_obstacle_count": 0,
+                "temporary_obstacle_count": temporary_count,
                 "mcl_state": localization_state,
                 "mcl_confidence": localizer.get_confidence(),
                 "mcl_ess": mcl_diagnostics.get("ess", ""),
@@ -589,12 +683,12 @@ def main() -> None:
                 "time": robot.getTime(),
                 "estimate": list(estimate.as_tuple()),
                 "active_waypoint": active_waypoint,
-                "mission_goal_index": mission_goal_index,
+                "mission_goal_index": telemetry_goal_index,
                 "minimum_lidar_range": (
                     minimum_front if math.isfinite(minimum_front) else None
                 ),
                 "mission_complete": mission_complete,
-                "mode": localization_mode,
+                "mode": experiment_method,
                 "planning_mode": planning_mode,
                 "planner_status": last_plan_status,
                 "commanded_linear_speed": linear_speed,

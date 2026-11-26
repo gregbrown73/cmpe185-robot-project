@@ -81,6 +81,19 @@ class TemporaryObstacleTests(unittest.TestCase):
         self.assertTrue(inflated.occupied(*dynamic_cell))
         self.assertGreaterEqual(inflated.inflation_radius_m, 0.0)
 
+    def test_dynamic_inflation_preserves_free_runtime_start_cell(self) -> None:
+        layer = TemporaryObstacleLayer(confirmation_count=1, ttl_s=5.0)
+        grid = self.grid()
+        pose = Pose2D(1.0, 1.0, 0.0)
+        self.assertTrue(layer.observe([(0.10, 0.0)], pose, grid, 0.0))
+        planning_grid = layer.build_planning_grid(
+            grid,
+            inflation_radius_m=0.5,
+            time_s=0.0,
+            start_xy=(pose.x, pose.y),
+        )
+        self.assertFalse(planning_grid.occupied(*grid.world_to_cell(pose.x, pose.y)))
+
 
 class SafetyLayerTask7Tests(unittest.TestCase):
     @staticmethod
@@ -129,6 +142,31 @@ class SafetyLayerTask7Tests(unittest.TestCase):
         safety.clear_replan_request()
         self.assertFalse(safety.replan_requested)
         self.assertEqual(safety.replan_reason, "NONE")
+
+    def test_in_place_rotation_does_not_trigger_progress_block(self) -> None:
+        safety = self.safety()
+        clear_scan = [(1.0, 0.0)]
+        for step in range(40):
+            safety.filter_command(
+                0.0,
+                0.55,
+                clear_scan,
+                pose=Pose2D(0.0, 0.0, 0.0),
+                target=(1.0, 0.0),
+                time_s=step * 0.1,
+            )
+        self.assertFalse(safety.blocked)
+        self.assertFalse(safety.replan_requested)
+
+    def test_local_avoidance_does_not_cancel_in_place_turn(self) -> None:
+        safety = self.safety()
+        linear, angular, _ = safety.filter_command(
+            0.0,
+            0.20,
+            [(0.14, 0.0)],
+        )
+        self.assertEqual(linear, 0.0)
+        self.assertAlmostEqual(angular, 0.20)
 
 
 if __name__ == "__main__":

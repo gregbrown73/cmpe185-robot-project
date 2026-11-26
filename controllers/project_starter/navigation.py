@@ -248,6 +248,7 @@ class SafetyLayer:
         progress_timeout_s: float = 3.0,
         replan_cooldown_s: float = 1.0,
         meaningful_progress_m: float = 0.05,
+        student_avoidance: bool = True,
     ) -> None:
         # TASK 7: Preserve the original emergency parameters while adding conservative
         # timing thresholds for local avoidance and blocked-route detection.
@@ -277,6 +278,7 @@ class SafetyLayer:
         self.progress_timeout_s = max(0.0, float(progress_timeout_s))
         self.replan_cooldown_s = max(0.0, float(replan_cooldown_s))
         self.meaningful_progress_m = max(0.0, float(meaningful_progress_m))
+        self.student_avoidance = bool(student_avoidance)
         self._clock_s = 0.0
         self._forward_blocked_since_s: float | None = None
         self._blocked_candidate = False
@@ -440,7 +442,9 @@ class SafetyLayer:
         # pose/target/time to enable the progress monitor without a new wheel
         # command stack.
         self._advance_clock(time_s)
-        if pose is not None:
+        # Do not call a deliberate in-place heading correction a progress
+        # failure; the follower reports zero linear speed while rotating.
+        if pose is not None and target is not None and linear_speed > 0.0:
             self.update_progress(pose, target, time_s=self._clock_s)
         front_points = [
             (x_forward, y_left)
@@ -453,7 +457,7 @@ class SafetyLayer:
 
         # Measure persistence in the forward avoidance corridor. A brief hit
         # receives local avoidance only; a sustained hit becomes a candidate.
-        if minimum_front < self.avoidance_distance:
+        if self.student_avoidance and minimum_front < self.avoidance_distance:
             if self._forward_blocked_since_s is None:
                 self._forward_blocked_since_s = self._clock_s
             elif self._clock_s - self._forward_blocked_since_s >= self.blocked_duration_s:
@@ -524,16 +528,24 @@ class SafetyLayer:
         if minimum_front < self.avoidance_distance:
             # Add a bounded, latched steering bias while preserving forward
             # motion whenever the emergency layer is not active.
-            self.state = "avoidance"
-            direction = self._local_avoidance_direction(scan_points_robot)
             linear_speed *= 0.30
-            angular_speed = max(-0.75, min(0.75, angular_speed + 0.22 * direction))
+            if self.student_avoidance:
+                self.state = "avoidance"
+                # Do not cancel the follower's deliberate in-place turn while
+                # it is aligning with a waypoint near a wall.
+                if linear_speed > 0.0:
+                    direction = self._local_avoidance_direction(scan_points_robot)
+                    angular_speed = max(-0.75, min(0.75, angular_speed + 0.22 * direction))
+            else:
+                # Preserve the original starter safety behavior for baseline
+                # comparison runs: slowdown without student steering.
+                self.state = "slowdown"
         else:
             self.state = "clear"
 
         # Persistent evidence is stopped safely here; the caller must confirm
         # it through TemporaryObstacleLayer before requesting a global replan.
-        if self._blocked_candidate:
+        if self.student_avoidance and self._blocked_candidate:
             self._mark_blocked_candidate()
             return 0.0, 0.0, minimum_front
         return linear_speed, angular_speed, minimum_front
